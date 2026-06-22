@@ -13,12 +13,17 @@ import (
 	"github.com/google/uuid"
 
 	authpkg "videohub/internal/auth"
+	"videohub/internal/models"
 	"videohub/internal/store"
 )
 
 var (
 	allowedVideoExt = map[string]bool{".mp4": true, ".webm": true}
 	allowedImageExt = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".webp": true}
+	allowedAudioExt = map[string]bool{
+		".mp3": true, ".wav": true, ".m4a": true, ".aac": true,
+		".ogg": true, ".opus": true, ".flac": true,
+	}
 )
 
 func (h *Handlers) UploadVideo(w http.ResponseWriter, r *http.Request) {
@@ -41,6 +46,34 @@ func (h *Handlers) UploadAd(w http.ResponseWriter, r *http.Request) {
 		writeUploadErr(w, err)
 		return
 	}
+	writeJSON(w, http.StatusCreated, map[string]string{"url": url})
+}
+
+// UploadAudio принимает аудиофайл (музыка / озвучка) для аудиодорожки редактора.
+// Кладёт его в uploads/AUDIO и регистрирует завершённую upload-сессию, чтобы файл
+// стал легальным источником аудиоклипа при экспорте (см. AuthorizeClipSource).
+func (h *Handlers) UploadAudio(w http.ResponseWriter, r *http.Request) {
+	if authpkg.Role(r) == "admin" {
+		writeError(w, http.StatusForbidden, "forbidden", "admins can upload ad files only")
+		return
+	}
+
+	url, err := h.saveUpload(r, "AUDIO", h.Cfg.MaxVideoBytes, allowedAudioExt)
+	if err != nil {
+		writeUploadErr(w, err)
+		return
+	}
+
+	// Привязываем файл к пользователю как завершённую сессию — иначе экспорт
+	// отклонит источник (нет прав использовать). Не критично для самой загрузки.
+	if sess, cerr := h.Store.CreateUploadSession(r.Context(), models.UploadSession{
+		UserID:     authpkg.UserID(r),
+		FileName:   "audio",
+		TotalParts: 1,
+	}); cerr == nil {
+		_ = h.Store.CompleteUploadSession(r.Context(), sess.ID, "", url)
+	}
+
 	writeJSON(w, http.StatusCreated, map[string]string{"url": url})
 }
 

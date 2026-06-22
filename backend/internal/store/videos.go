@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/google/uuid"
@@ -26,10 +27,18 @@ SELECT
 	v.tags,
 	v.uploaded_at,
 	c.name        AS channel_name,
-	c.avatar_url  AS channel_avatar
+	c.avatar_url  AS channel_avatar,
+	v.transcript_status,
+	v.original_language,
+	v.chapters,
+	v.allow_remix,
+	v.source_video_id,
+	v.source_channel_id,
+	sc.name AS source_channel_name
 FROM videos v
 JOIN channels c ON c.id = v.channel_id
 LEFT JOIN channel_overrides o ON o.channel_id = v.channel_id
+LEFT JOIN channels sc ON sc.id = v.source_channel_id
 `
 
 type ListVideosParams struct {
@@ -127,14 +136,46 @@ func (s *Store) CreateVideo(ctx context.Context, in models.Video) (*models.Video
 	_, err := s.Pool.Exec(ctx, `
 		INSERT INTO videos
 			(id, channel_id, title, description, thumbnail_url, video_url, duration_sec,
-			 category, visibility, tags)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+			 category, visibility, tags, allow_remix, source_video_id, source_channel_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
 		in.ID, in.ChannelID, in.Title, in.Description, in.ThumbnailURL, in.VideoURL, in.DurationSec,
-		in.Category, in.Visibility, in.Tags)
+		in.Category, in.Visibility, in.Tags, in.AllowRemix, in.SourceVideoID, in.SourceChannelID)
 	if err != nil {
 		return nil, err
 	}
 	return s.GetVideo(ctx, in.ID)
+}
+
+// SetVideoAllowRemix переключает разрешение на ремикс. Только владелец канала видео
+// (проверяется на уровне хендлера через ownerOfVideo).
+func (s *Store) SetVideoAllowRemix(ctx context.Context, videoID string, allow bool) error {
+	_, err := s.Pool.Exec(ctx, `UPDATE videos SET allow_remix=$2 WHERE id=$1`, videoID, allow)
+	return err
+}
+
+// SetVideoOutput фиксирует результат серверного рендера: путь к файлу, обложку,
+// длительность и видимость. Вызывается render.py по завершении экспорта.
+func (s *Store) SetVideoOutput(ctx context.Context, videoID, videoURL, thumbnailURL string, durationSec int, visibility string) error {
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE videos
+		SET video_url=$2,
+		    thumbnail_url = CASE WHEN $3 <> '' THEN $3 ELSE thumbnail_url END,
+		    duration_sec  = CASE WHEN $4 > 0 THEN $4 ELSE duration_sec END,
+		    visibility    = $5
+		WHERE id=$1`, videoID, videoURL, thumbnailURL, durationSec, visibility)
+	return err
+}
+
+// OwnerOfVideo возвращает user_id владельца канала, которому принадлежит видео.
+func (s *Store) OwnerOfVideo(ctx context.Context, videoID string) (string, error) {
+	var ownerID string
+	err := s.Pool.QueryRow(ctx,
+		`SELECT c.owner_id FROM videos v JOIN channels c ON c.id=v.channel_id WHERE v.id=$1`,
+		videoID).Scan(&ownerID)
+	if isNoRows(err) {
+		return "", ErrNotFound
+	}
+	return ownerID, err
 }
 
 func (s *Store) DeleteVideo(ctx context.Context, id string) error {
@@ -236,13 +277,26 @@ func (s *Store) RegisterView(ctx context.Context, videoID, userID string) (bool,
 		videoID); err != nil {
 		return false, err
 	}
-	// Демо-монетизация: канал зарабатывает 1 тенге за каждый засчитанный просмотр.
+	// Монетизация: канал получает 100 тенге за каждую полную 1000 суммарных просмотров.
 	if _, err := tx.Exec(ctx, `
+		WITH video_channel AS (
+			SELECT channel_id FROM videos WHERE id = $1
+		),
+		channel_views AS (
+			SELECT COALESCE(SUM(v.views_count), 0) AS views
+			FROM videos v
+			JOIN video_channel vc ON vc.channel_id = v.channel_id
+		),
+		payout AS (
+			SELECT CASE WHEN views % $2 = 0 THEN $3 ELSE 0 END AS amount
+			FROM channel_views
+		)
 		UPDATE channels SET
-			balance      = balance + 1,
-			total_earned = total_earned + 1
-		WHERE id = (SELECT channel_id FROM videos WHERE id = $1)`,
-		videoID); err != nil {
+			balance      = balance + payout.amount,
+			total_earned = total_earned + payout.amount
+		FROM video_channel, payout
+		WHERE channels.id = video_channel.channel_id`,
+		videoID, ViewPayoutViews, ViewPayoutTenge); err != nil {
 		return false, err
 	}
 	return true, tx.Commit(ctx)
@@ -271,9 +325,24 @@ type rowScanner interface {
 
 func scanVideoRow(row rowScanner) (models.Video, error) {
 	var v models.Video
+	var chaptersRaw []byte
 	err := row.Scan(&v.ID, &v.ChannelID, &v.Title, &v.Description, &v.ThumbnailURL, &v.VideoURL, &v.DurationSec,
 		&v.Views, &v.Likes, &v.Dislikes, &v.Category, &v.Visibility, &v.Tags, &v.UploadedAt,
-		&v.ChannelName, &v.ChannelAvatar)
+		&v.ChannelName, &v.ChannelAvatar,
+		&v.TranscriptStatus, &v.OriginalLanguage, &chaptersRaw,
+		&v.AllowRemix, &v.SourceVideoID, &v.SourceChannelID, &v.SourceChannelName)
+	if err != nil {
+		return v, err
+	}
+	if len(chaptersRaw) > 0 {
+		if jerr := json.Unmarshal(chaptersRaw, &v.Chapters); jerr != nil {
+			// Не валим запрос — просто оставляем пустые главы.
+			v.Chapters = nil
+		}
+	}
+	if v.Chapters == nil {
+		v.Chapters = []models.Chapter{}
+	}
 	return v, err
 }
 

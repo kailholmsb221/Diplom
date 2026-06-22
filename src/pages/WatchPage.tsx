@@ -1,34 +1,51 @@
-import { useEffect } from 'react'
+import { useMemo, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ThumbsUp, ThumbsDown } from 'lucide-react'
-import { getRecommended, getVideoById, getUserReaction, setReaction, incrementViews } from '@/api/videos'
+import {
+  getRecommended,
+  getVideoById,
+  getUserReaction,
+  setReaction,
+  incrementViews,
+} from '@/api/videos'
 import { getChannelById } from '@/api/channels'
 import { fetchActiveAd } from '@/api/ads'
+import { fetchSubtitles } from '@/api/transcripts'
 import { useAuthStore } from '@/stores/authStore'
-import { VideoPlayer } from '@/features/video/player/VideoPlayer'
+import { VideoPlayer, type PlayerHandle } from '@/features/video/player/VideoPlayer'
 import { VideoCard } from '@/features/video/VideoCard'
 import { SubscribeButton } from '@/features/channel/SubscribeButton'
 import { CommentForm } from '@/features/comment/CommentForm'
 import { CommentList } from '@/features/comment/CommentList'
+import { TranscriptPanel } from '@/features/transcript/TranscriptPanel'
+import { ChaptersList } from '@/features/transcript/ChaptersList'
+import { RemixActions } from '@/features/editor/RemixActions'
 import { Avatar } from '@/shared/ui/Avatar'
-import { Button } from '@/shared/ui/Button'
 import { Loader, ErrorState } from '@/shared/ui/states'
 import { formatDate, formatNumber, formatSubscribers, formatViews } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/cn'
 import { useIsAuthenticated } from '@/stores/authStore'
 import { requireAuth } from '@/features/auth/AuthPrompt'
+import type { TranscriptLanguage } from '@/shared/types'
+
+const LANG_LABELS: Record<TranscriptLanguage, string> = {
+  ru: 'Русский',
+  kk: 'Қазақша',
+  en: 'English',
+}
 
 export function WatchPage() {
   const { videoId = '' } = useParams()
   const qc = useQueryClient()
   const isAuthed = useIsAuthenticated()
+  const playerRef = useRef<PlayerHandle | null>(null)
 
   const isPremium = useAuthStore((s) => s.user?.premium ?? false)
+  const currentUserId = useAuthStore((s) => s.user?.id)
   const { data: ad } = useQuery({
     queryKey: ['ad', 'active'],
     queryFn: fetchActiveAd,
-    // Премиум-пользователи рекламу не получают вовсе.
     enabled: !isPremium,
     staleTime: 60_000,
   })
@@ -36,6 +53,11 @@ export function WatchPage() {
   const { data: video, isLoading, isError, refetch } = useQuery({
     queryKey: ['video', videoId],
     queryFn: () => getVideoById(videoId),
+    // Пока транскрипция идёт — подтягиваем главы.
+    refetchInterval: (q) => {
+      const s = q.state.data?.transcriptStatus
+      return s === 'PROCESSING' || s === 'TRANSLATING' ? 5_000 : false
+    },
   })
   const { data: channel } = useQuery({
     queryKey: ['channel', video?.channelId],
@@ -51,6 +73,23 @@ export function WatchPage() {
     queryKey: ['recommended', videoId],
     queryFn: () => getRecommended(videoId, 10),
   })
+  const { data: subtitles } = useQuery({
+    queryKey: ['subtitles', videoId],
+    queryFn: () => fetchSubtitles(videoId),
+    refetchInterval: (q) => {
+      const s = q.state.data?.videoStatus
+      return s === 'PROCESSING' || s === 'TRANSLATING' ? 5_000 : false
+    },
+  })
+
+  const subtitleTracks = useMemo(() => {
+    if (!subtitles) return []
+    return subtitles.availableLanguages.map((lang) => ({
+      language: lang,
+      label: LANG_LABELS[lang],
+      src: subtitles.subtitleUrls[lang] ?? '',
+    }))
+  }, [subtitles])
 
   const reactMutation = useMutation({
     mutationFn: async (next: 'like' | 'dislike' | null) => setReaction(videoId, next),
@@ -64,6 +103,10 @@ export function WatchPage() {
     const verb = next === 'like' ? 'поставить лайк' : 'поставить дизлайк'
     if (!requireAuth(`Чтобы ${verb}, зарегистрируйтесь или войдите.`)) return
     reactMutation.mutate(reaction === next ? null : next)
+  }
+
+  function seekTo(seconds: number) {
+    playerRef.current?.seekTo(seconds)
   }
 
   if (isLoading) return <Loader />
@@ -81,11 +124,11 @@ export function WatchPage() {
       <div className="flex-1 min-w-0">
         <div className="rounded-xl overflow-hidden bg-black">
           <VideoPlayer
+            ref={playerRef}
             video={video}
             preRollAd={isPremium ? null : ad}
+            subtitleTracks={subtitleTracks}
             onFirstPlay={() => {
-              // Анонимные просмотры не считаем — backend и так их игнорирует,
-              // но фронт лишний раз не дёргает API.
               if (isAuthed) void incrementViews(videoId)
             }}
           />
@@ -142,7 +185,16 @@ export function WatchPage() {
             )}
           </div>
           <p className="text-sm mt-2 whitespace-pre-wrap">{video.description}</p>
+          <ChaptersList chapters={video.chapters ?? []} onSeek={seekTo} />
         </div>
+
+        <div className="mt-3">
+          <RemixActions video={video} isOwner={!!currentUserId && channel?.ownerId === currentUserId} />
+        </div>
+
+        <section className="mt-6">
+          <TranscriptPanel videoId={videoId} onSeek={seekTo} />
+        </section>
 
         <section className="mt-8">
           <h2 className="text-base font-semibold mb-4">Комментарии</h2>

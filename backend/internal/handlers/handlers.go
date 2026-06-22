@@ -9,17 +9,26 @@ import (
 
 	authpkg "videohub/internal/auth"
 	"videohub/internal/config"
+	"videohub/internal/render"
 	"videohub/internal/store"
+	"videohub/internal/transcribe"
 )
 
 // Handlers — корневой контейнер для зависимостей хендлеров.
 type Handlers struct {
-	Store  *store.Store
-	Cfg    config.Config
+	Store       *store.Store
+	Cfg         config.Config
+	Transcriber *transcribe.Spawner
+	Renderer    *render.Spawner
 }
 
 func New(s *store.Store, cfg config.Config) *Handlers {
-	return &Handlers{Store: s, Cfg: cfg}
+	return &Handlers{
+		Store:       s,
+		Cfg:         cfg,
+		Transcriber: transcribe.New(cfg, s),
+		Renderer:    render.New(cfg, s),
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

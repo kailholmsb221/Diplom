@@ -79,6 +79,11 @@ func (h *Handlers) CreateVideo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "validation", "title and channelId are required")
 		return
 	}
+	req.VideoURL = strings.TrimSpace(req.VideoURL)
+	if !isUploadedChannelVideoURL(req.VideoURL) {
+		writeError(w, http.StatusBadRequest, "validation", "video must be uploaded as a file; YouTube or external video links are not allowed")
+		return
+	}
 	if req.Visibility == "" {
 		req.Visibility = "public"
 	}
@@ -103,6 +108,16 @@ func (h *Handlers) CreateVideo(w http.ResponseWriter, r *http.Request) {
 	if handleStoreErr(w, err) {
 		return
 	}
+
+	// Если видео физически лежит в uploads — запускаем транскрипцию в фоне.
+	// Внешние URL (например googleapis) пропускаются.
+	if localPath, ok := h.localFileFromURL(req.VideoURL); ok {
+		if err := h.Store.SetVideoTranscriptStatus(r.Context(), v.ID, models.TranscriptProcessing, ""); err == nil {
+			h.Transcriber.Transcribe(v.ID, localPath)
+			v.TranscriptStatus = models.TranscriptProcessing
+		}
+	}
+
 	writeJSON(w, http.StatusCreated, v)
 }
 
@@ -210,4 +225,18 @@ func normalizeTags(tags []string) []string {
 		out = append(out, tag)
 	}
 	return out
+}
+
+func isUploadedChannelVideoURL(videoURL string) bool {
+	const marker = "/uploads/MP4/"
+	idx := strings.Index(videoURL, marker)
+	if idx < 0 {
+		return false
+	}
+	fileName := videoURL[idx+len(marker):]
+	if fileName == "" || strings.Contains(fileName, "/") || strings.Contains(fileName, "\\") {
+		return false
+	}
+	lower := strings.ToLower(fileName)
+	return strings.HasSuffix(lower, ".mp4") || strings.HasSuffix(lower, ".webm")
 }

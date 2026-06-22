@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import ReactPlayer from 'react-player'
 import {
   Play,
@@ -11,14 +11,25 @@ import {
   Settings as SettingsIcon,
   SkipForward,
 } from 'lucide-react'
-import type { Video, Quality, Ad } from '@/shared/types'
+import type { Video, Quality, Ad, TranscriptLanguage } from '@/shared/types'
 import { usePlayerStore } from '@/stores/playerStore'
 import { formatDuration } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/cn'
 
+export interface SubtitleTrack {
+  language: TranscriptLanguage
+  label: string
+  src: string
+}
+
+export interface PlayerHandle {
+  seekTo: (seconds: number) => void
+}
+
 interface VideoPlayerProps {
   video: Video
   preRollAd?: Ad | null
+  subtitleTracks?: SubtitleTrack[]
   onFirstPlay?: () => void
   onAdFinish?: () => void
 }
@@ -28,7 +39,10 @@ const AD_SKIPPABLE_AFTER = 5
 const SPACE_HOLD_MS = 220
 const KEY_SEEK_SECONDS = 5
 
-export function VideoPlayer({ video, preRollAd, onFirstPlay, onAdFinish }: VideoPlayerProps) {
+export const VideoPlayer = forwardRef<PlayerHandle, VideoPlayerProps>(function VideoPlayer(
+  { video, preRollAd, subtitleTracks, onFirstPlay, onAdFinish },
+  outerRef,
+) {
   const playerRef = useRef<ReactPlayer | null>(null)
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const progressBarRef = useRef<HTMLDivElement | null>(null)
@@ -78,6 +92,32 @@ export function VideoPlayer({ video, preRollAd, onFirstPlay, onAdFinish }: Video
   useEffect(() => {
     durationRef.current = duration
   }, [duration])
+
+  // Внешний handle для seek из родителя (нужен для кликабельных таймкодов и
+  // сегментов расшифровки). Реклама не перематывается извне.
+  useImperativeHandle(
+    outerRef,
+    () => ({
+      seekTo(seconds: number) {
+        if (isAd) return
+        const total = durationRef.current || duration
+        if (total) {
+          const clamped = Math.max(0, Math.min(total, seconds))
+          playerRef.current?.seekTo(clamped, 'seconds')
+          setPlayed(clamped / total)
+        } else {
+          playerRef.current?.seekTo(seconds, 'seconds')
+        }
+        setShowControls(true)
+        if (!firstPlayed) {
+          setFirstPlayed(true)
+          onFirstPlay?.()
+        }
+        setPlaying(true)
+      },
+    }),
+    [isAd, duration, firstPlayed, onFirstPlay],
+  )
 
   useEffect(() => {
     function onChange() {
@@ -311,7 +351,21 @@ export function VideoPlayer({ video, preRollAd, onFirstPlay, onAdFinish }: Video
         onEnded={() => {
           if (isAd) finishAd()
         }}
-        config={{ file: { attributes: { controlsList: 'nodownload', playsInline: true } } }}
+        config={{
+          file: {
+            attributes: { controlsList: 'nodownload', playsInline: true, crossOrigin: 'anonymous' },
+            // Субтитры — только для основного видео, не для рекламы.
+            tracks: isAd
+              ? []
+              : (subtitleTracks ?? []).map((t, i) => ({
+                  kind: 'subtitles',
+                  src: t.src,
+                  srcLang: t.language,
+                  label: t.label,
+                  default: i === 0,
+                })),
+          },
+        }}
       />
 
       <button
@@ -469,7 +523,7 @@ export function VideoPlayer({ video, preRollAd, onFirstPlay, onAdFinish }: Video
       </div>
     </div>
   )
-}
+})
 
 function SettingsPanel({
   playbackRate,

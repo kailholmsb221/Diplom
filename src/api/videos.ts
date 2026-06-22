@@ -122,3 +122,10 @@ export async function uploadImageFile(file: File): Promise<string> {
   const { url } = await api<{ url: string }>('/api/upload/image', { method: 'POST', body: fd })
   return url
 }
+
+export async function uploadAudioFile(file: File): Promise<string> {
+  const fd = new FormData()
+  fd.append('file', file)
+  const { url } = await api<{ url: string }>('/api/upload/audio', { method: 'POST', body: fd })
+  return url
+}

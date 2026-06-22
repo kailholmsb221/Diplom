@@ -1,11 +1,13 @@
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Trash2 } from 'lucide-react'
+import { Scissors, Trash2 } from 'lucide-react'
 import { deleteVideo, fetchVideos } from '@/api/videos'
 import { getChannelByOwner } from '@/api/channels'
 import { getCurrentUser } from '@/api/users'
+import { createProject } from '@/api/editor'
 import { Button } from '@/shared/ui/Button'
 import { Loader, EmptyState } from '@/shared/ui/states'
+import { toast } from '@/shared/ui/toast'
 import { formatDuration, formatNumber, timeAgo } from '@/shared/lib/format'
 
 export function MyVideosPage() {
@@ -22,9 +24,16 @@ export function MyVideosPage() {
     enabled: !!channel,
   })
 
+  const navigate = useNavigate()
   const remove = useMutation({
     mutationFn: (id: string) => deleteVideo(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['videos'] }),
+  })
+
+  const openEditor = useMutation({
+    mutationFn: (videoId: string) => createProject({ sourceVideoId: videoId, isRemix: false }),
+    onSuccess: (project) => navigate(`/me/editor/${project.id}`),
+    onError: (e) => toast(e instanceof Error ? e.message : 'Не удалось открыть редактор', 'error'),
   })
 
   const isAdmin = user?.role === 'admin'
@@ -92,7 +101,16 @@ export function MyVideosPage() {
                   <td className="px-4 py-3 text-muted">{timeAgo(v.uploadedAt)}</td>
                   <td className="px-4 py-3">{formatNumber(v.views)}</td>
                   <td className="px-4 py-3">{formatNumber(v.likes)}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    <button
+                      onClick={() => openEditor.mutate(v.id)}
+                      disabled={openEditor.isPending || !v.sources.length}
+                      className="p-2 rounded hover:bg-brand/10 hover:text-brand disabled:opacity-40"
+                      aria-label="Редактировать в видеоредакторе"
+                      title="Редактировать"
+                    >
+                      <Scissors className="w-4 h-4" />
+                    </button>
                     <button
                       onClick={() => {
                         if (confirm(`Удалить «${v.title}»?`)) remove.mutate(v.id)
