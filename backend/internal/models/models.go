@@ -53,22 +53,66 @@ type Transaction struct {
 }
 
 type Video struct {
-	ID            string    `json:"id"`
-	ChannelID     string    `json:"channelId"`
-	Title         string    `json:"title"`
-	Description   string    `json:"description"`
-	ThumbnailURL  string    `json:"thumbnailUrl"`
-	VideoURL      string    `json:"videoUrl"`
-	DurationSec   int       `json:"durationSec"`
-	Views         int64     `json:"views"`
-	Likes         int64     `json:"likes"`
-	Dislikes      int64     `json:"dislikes"`
-	Category      string    `json:"category"`
-	Visibility    string    `json:"visibility"`
-	Tags          []string  `json:"tags"`
-	UploadedAt    time.Time `json:"uploadedAt"`
-	ChannelName   string    `json:"channelName,omitempty"`
-	ChannelAvatar string    `json:"channelAvatar,omitempty"`
+	ID               string    `json:"id"`
+	ChannelID        string    `json:"channelId"`
+	Title            string    `json:"title"`
+	Description      string    `json:"description"`
+	ThumbnailURL     string    `json:"thumbnailUrl"`
+	VideoURL         string    `json:"videoUrl"`
+	DurationSec      int       `json:"durationSec"`
+	Views            int64     `json:"views"`
+	Likes            int64     `json:"likes"`
+	Dislikes         int64     `json:"dislikes"`
+	Category         string    `json:"category"`
+	Visibility       string    `json:"visibility"`
+	Tags             []string  `json:"tags"`
+	UploadedAt       time.Time `json:"uploadedAt"`
+	ChannelName      string    `json:"channelName,omitempty"`
+	ChannelAvatar    string    `json:"channelAvatar,omitempty"`
+	TranscriptStatus string    `json:"transcriptStatus"`
+	OriginalLanguage *string   `json:"originalLanguage,omitempty"`
+	Chapters         []Chapter `json:"chapters"`
+	// Ремикс / атрибуция (см. миграцию 009).
+	AllowRemix        bool    `json:"allowRemix"`
+	SourceVideoID     *string `json:"sourceVideoId,omitempty"`
+	SourceChannelID   *string `json:"sourceChannelId,omitempty"`
+	SourceChannelName *string `json:"sourceChannelName,omitempty"`
+}
+
+// Статусы процесса транскрипции (общие для уровня видео и каждого языка).
+const (
+	TranscriptNotStarted  = "NOT_STARTED"
+	TranscriptProcessing  = "PROCESSING"
+	TranscriptTranslating = "TRANSLATING"
+	TranscriptCompleted   = "COMPLETED"
+	TranscriptFailed      = "FAILED"
+)
+
+// Chapter — таймкод-глава, автоматически генерируется из сегментов расшифровки.
+type Chapter struct {
+	Start float64 `json:"start"`
+	Title string  `json:"title"`
+}
+
+// TranscriptSegment — один сегмент таймкодированной расшифровки.
+// start/end — секунды от начала видео, общие для всех языков.
+type TranscriptSegment struct {
+	Start float64 `json:"start"`
+	End   float64 `json:"end"`
+	Text  string  `json:"text"`
+}
+
+// Transcript — расшифровка/перевод на конкретный язык.
+type Transcript struct {
+	VideoID    string              `json:"videoId"`
+	Language   string              `json:"language"`
+	IsOriginal bool                `json:"isOriginal"`
+	Status     string              `json:"status"`
+	FullText   string              `json:"fullText"`
+	Segments   []TranscriptSegment `json:"segments"`
+	VTTUrl     string              `json:"vttUrl,omitempty"`
+	Error      string              `json:"error,omitempty"`
+	UpdatedAt  time.Time           `json:"updatedAt"`
 }
 
 type Comment struct {

@@ -8,6 +8,7 @@ import { SubscriptionsPage } from '@/pages/SubscriptionsPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 import { MeDashboard } from '@/pages/me/MeDashboard'
 import { UploadPage } from '@/pages/me/UploadPage'
+import { EditorPage } from '@/pages/me/EditorPage'
 import { MyVideosPage } from '@/pages/me/MyVideosPage'
 import { MyStatsPage } from '@/pages/me/MyStatsPage'
 import { AdminLayout } from '@/pages/admin/AdminLayout'
@@ -69,6 +70,14 @@ export const router = createBrowserRouter([
         element: (
           <RequireAuth>
             <MyVideosPage />
+          </RequireAuth>
+        ),
+      },
+      {
+        path: 'me/editor/:projectId',
+        element: (
+          <RequireAuth>
+            <EditorPage />
           </RequireAuth>
         ),
       },

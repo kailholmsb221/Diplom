@@ -11,8 +11,11 @@ import (
 	"videohub/internal/models"
 )
 
-// Цена просмотра — 1 тенге за один уникальный просмотр.
-const ViewPayoutPerView int64 = 1
+// Цена просмотров: 100 тенге за каждые полные 1000 просмотров.
+const (
+	ViewPayoutViews int64 = 1000
+	ViewPayoutTenge int64 = 100
+)
 
 // Цена премиума и срок действия в днях. Демо-значения.
 const (
@@ -30,7 +33,7 @@ func scanTx(row interface{ Scan(...any) error }, t *models.Transaction) error {
 		&t.Status, &t.Description, &t.CardLast4, &t.CreatedAt)
 }
 
-// AddChannelEarning начисляет 1 тенге на баланс канала, владеющего видео.
+// AddChannelEarning начисляет указанную сумму на баланс канала, владеющего видео.
 // Вызывается вместе с RegisterView в одной транзакции — см. videos.go.
 // Здесь — отдельный helper для случая, когда нужно начислить вручную.
 func (s *Store) AddChannelEarning(ctx context.Context, videoID string, amount int64) error {

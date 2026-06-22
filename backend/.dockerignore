@@ -4,9 +4,11 @@ bin/
 uploads/MP4/*
 uploads/PNG/*
 uploads/ADS/*
+uploads/SUBTITLES/*
 !uploads/MP4/.gitkeep
 !uploads/PNG/.gitkeep
 !uploads/ADS/.gitkeep
+!uploads/SUBTITLES/.gitkeep
 *.log
 .git
 .idea

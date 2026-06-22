@@ -26,6 +26,21 @@ type Config struct {
 	// AuthExposeCode = true означает, что backend будет возвращать сгенерированный код
 	// прямо в ответе API (для демонстрации без SMTP). В проде должно быть false.
 	AuthExposeCode bool
+
+	// --- Транскрипция (Python worker) ---
+	// Если PythonPath или WorkerPath пусты / файл не найден — фича отключается,
+	// но видео остаются рабочими (TranscriptStatus = NOT_STARTED).
+	PythonPath     string
+	WorkerPath     string
+	WhisperModel   string // tiny / base / small / medium / large-v3
+	WhisperCompute string // int8 / float32 / ...
+
+	// --- Видеоредактор: серверный рендер (экспорт) ---
+	// Если RenderWorkerPath пуст / файл не найден — экспорт сразу падает в FAILED,
+	// но остальной функционал редактора (загрузка, метаданные) работает.
+	RenderWorkerPath string
+	FFmpegPath       string
+	FFprobePath      string
 }
 
 func Load() Config {
@@ -47,6 +62,15 @@ func Load() Config {
 		AdminPassword:  getEnv("ADMIN_PASSWORD", "admin1"),
 		AuthCodeTTLMin: int(getEnvInt64("AUTH_CODE_TTL_MIN", 10)),
 		AuthExposeCode: getEnvBool("AUTH_EXPOSE_CODE", true),
+
+		PythonPath:     getEnv("PYTHON_BIN", "python3"),
+		WorkerPath:     getEnv("WHISPER_WORKER", "/app/worker/transcribe.py"),
+		WhisperModel:   getEnv("WHISPER_MODEL", "small"),
+		WhisperCompute: getEnv("WHISPER_COMPUTE", "int8"),
+
+		RenderWorkerPath: getEnv("RENDER_WORKER", "/app/worker/render.py"),
+		FFmpegPath:       getEnv("FFMPEG_BIN", "ffmpeg"),
+		FFprobePath:      getEnv("FFPROBE_BIN", "ffprobe"),
 	}
 }
 

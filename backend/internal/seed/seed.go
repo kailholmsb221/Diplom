@@ -19,7 +19,7 @@ func Run(ctx context.Context, pool *pgxpool.Pool, defaultUserID string) error {
 		return err
 	}
 	if n > 0 {
-		return nil
+		return ensureBulkSeed(ctx, pool)
 	}
 	return reseed(ctx, pool, defaultUserID)
 }
@@ -27,6 +27,34 @@ func Run(ctx context.Context, pool *pgxpool.Pool, defaultUserID string) error {
 // Force всегда наполняет БД (предполагается, что таблицы уже пустые).
 func Force(ctx context.Context, pool *pgxpool.Pool, defaultUserID string) error {
 	return reseed(ctx, pool, defaultUserID)
+}
+
+func ensureBulkSeed(ctx context.Context, pool *pgxpool.Pool) error {
+	var n int
+	if err := pool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM videos
+		WHERE id::text LIKE 'dd000000-%'
+		  AND video_url LIKE '%youtube.com%'
+		  AND views_count > 0
+		  AND likes_count > 0
+		  AND dislikes_count > 0`).Scan(&n); err != nil {
+		return err
+	}
+	if n >= bulkChannelLimit*videosPerBulkChannel {
+		return nil
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if err := seedBulkChannels(ctx, tx, time.Now().UTC()); err != nil {
+		return fmt.Errorf("seed bulk channels: %w", err)
+	}
+	return tx.Commit(ctx)
 }
 
 func reseed(ctx context.Context, pool *pgxpool.Pool, defaultUserID string) error {
@@ -175,6 +203,10 @@ func reseed(ctx context.Context, pool *pgxpool.Pool, defaultUserID string) error
 			ad.title, ad.description, ad.videoURL, ad.active); err != nil {
 			return fmt.Errorf("seed ads: %w", err)
 		}
+	}
+
+	if err := seedBulkChannels(ctx, tx, now); err != nil {
+		return fmt.Errorf("seed bulk channels: %w", err)
 	}
 
 	return tx.Commit(ctx)

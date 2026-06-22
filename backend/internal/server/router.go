@@ -47,6 +47,9 @@ func NewRouter(h *handlers.Handlers, cfg config.Config) http.Handler {
 	_ = os.MkdirAll(filepath.Join(staticAbs, "MP4"), 0o755)
 	_ = os.MkdirAll(filepath.Join(staticAbs, "PNG"), 0o755)
 	_ = os.MkdirAll(filepath.Join(staticAbs, "ADS"), 0o755)
+	_ = os.MkdirAll(filepath.Join(staticAbs, "SUBTITLES"), 0o755)
+	_ = os.MkdirAll(filepath.Join(staticAbs, "TMP"), 0o755) // части multipart-загрузок
+	_ = os.MkdirAll(filepath.Join(staticAbs, "HLS"), 0o755) // результат экспорта (HLS)
 	fs := http.StripPrefix("/uploads/", http.FileServer(http.Dir(staticAbs)))
 	r.Get("/uploads/{subdir}/{file}", h.ServeUpload)
 	r.Handle("/uploads/*", fs)
@@ -77,12 +80,40 @@ func NewRouter(h *handlers.Handlers, cfg config.Config) http.Handler {
 		// Реклама — публично читаем активную.
 		r.Get("/ads/active", h.ActiveAd)
 
+		// Транскрипция / субтитры — публично.
+		r.Get("/videos/{id}/transcript", h.GetTranscript)
+		r.Get("/videos/{id}/subtitles", h.GetSubtitles)
+
 		// ---------- Требуют авторизации ----------
 		r.Group(func(r chi.Router) {
 			r.Use(authpkg.RequireAuth)
 
 			r.Post("/videos", h.CreateVideo)
 			r.Delete("/videos/{id}", h.DeleteVideo)
+
+			// ---------- Видеоредактор: загрузка ----------
+			r.Post("/videos/upload-url", h.UploadURL)
+			r.Post("/videos/multipart/init", h.MultipartInit)
+			r.Put("/videos/multipart/{uploadId}/part/{partNumber}", h.MultipartPart)
+			r.Post("/videos/multipart/complete", h.MultipartComplete)
+
+			// ---------- Видеоредактор: экспорт (рендер) ----------
+			r.Post("/videos/{id}/export", h.ExportVideo)
+			r.Get("/videos/{id}/export/{jobId}", h.GetExportJob)
+			r.Get("/videos/{id}/export/{jobId}/progress", h.ExportProgress)
+
+			// ---------- Видеоредактор: проекты (черновики монтажа) ----------
+			r.Post("/editor/projects", h.CreateEditorProject)
+			r.Get("/editor/projects", h.ListEditorProjects)
+			r.Get("/editor/projects/{id}", h.GetEditorProject)
+			r.Patch("/editor/projects/{id}", h.UpdateEditorProject)
+			r.Delete("/editor/projects/{id}", h.DeleteEditorProject)
+			r.Post("/editor/projects/{id}/export", h.ExportEditorProject)
+			r.Get("/editor/projects/{id}/export/{jobId}", h.GetExportJob)
+			r.Get("/editor/projects/{id}/export/{jobId}/progress", h.ExportProgress)
+
+			// Разрешение на ремикс («Создать свою версию») — управляет автор.
+			r.Post("/videos/{id}/remix-permission", h.SetVideoRemixPermission)
 			r.Get("/videos/{id}/reaction", h.GetReaction)
 			r.Post("/videos/{id}/reaction", h.SetReaction)
 			r.Post("/videos/{id}/comments", h.AddComment)
@@ -100,12 +131,17 @@ func NewRouter(h *handlers.Handlers, cfg config.Config) http.Handler {
 
 			r.Post("/upload/video", h.UploadVideo)
 			r.Post("/upload/image", h.UploadImage)
+			r.Post("/upload/audio", h.UploadAudio)
 
 			// Монетизация
 			r.Post("/premium/buy", h.BuyPremium)
 			r.Get("/transactions/me", h.MyTransactions)
 			r.Get("/channels/me", h.MyChannel)
 			r.Post("/channels/me/payout", h.PayoutMyChannel)
+
+			// Транскрипция — повторный запуск.
+			r.Post("/videos/{id}/transcribe", h.StartTranscribe)
+			r.Post("/videos/{id}/translate", h.StartTranslate)
 		})
 
 		// ---------- Только админ ----------

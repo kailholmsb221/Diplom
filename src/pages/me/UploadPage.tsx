@@ -6,6 +6,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { UploadCloud } from 'lucide-react'
 import { uploadImageFile, uploadVideo, uploadVideoFile } from '@/api/videos'
+import { createProject } from '@/api/editor'
 import { getChannelByOwner } from '@/api/channels'
 import { getCurrentUser } from '@/api/users'
 import { Input, Textarea } from '@/shared/ui/Input'
@@ -64,6 +65,7 @@ export function UploadPage() {
   const [thumbFile, setThumbFile] = useState<File | null>(null)
   const [thumbPreview, setThumbPreview] = useState<string>('')
   const [submitError, setSubmitError] = useState('')
+  const [openInEditor, setOpenInEditor] = useState(false)
 
   const { data: user } = useQuery({ queryKey: ['currentUser'], queryFn: getCurrentUser })
   const { data: channel } = useQuery({
@@ -103,7 +105,18 @@ export function UploadPage() {
         tags: parseTags(data.tags),
       })
     },
-    onSuccess: () => navigate('/me/videos'),
+    onSuccess: async (video) => {
+      if (openInEditor) {
+        try {
+          const project = await createProject({ sourceVideoId: video.id, isRemix: false })
+          navigate(`/me/editor/${project.id}`)
+          return
+        } catch {
+          /* при ошибке создания проекта просто уходим в список видео */
+        }
+      }
+      navigate('/me/videos')
+    },
     onError: (e: Error) => setSubmitError(e.message),
   })
 
@@ -209,11 +222,19 @@ export function UploadPage() {
 
         {submitError && <p className="text-danger text-sm">{submitError}</p>}
 
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button type="button" variant="ghost" onClick={() => navigate(-1)}>
             Отмена
           </Button>
-          <Button type="submit" disabled={upload.isPending}>
+          <Button
+            type="submit"
+            variant="subtle"
+            disabled={upload.isPending}
+            onClick={() => setOpenInEditor(true)}
+          >
+            {upload.isPending ? 'Загрузка...' : 'Опубликовать и открыть в редакторе'}
+          </Button>
+          <Button type="submit" disabled={upload.isPending} onClick={() => setOpenInEditor(false)}>
             {upload.isPending ? 'Загрузка...' : 'Опубликовать'}
           </Button>
         </div>

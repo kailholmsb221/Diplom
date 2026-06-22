@@ -1,0 +1,9 @@
+# Python зависимости для worker'а транскрипции.
+# Системные требования: ffmpeg (apt install -y ffmpeg) и Python >= 3.10.
+#
+# Закрепляем только верхний уровень — pip сам подберёт совместимые транзитивные
+# версии (со строгими pin часто ловим hash mismatch на зеркалах).
+
+faster-whisper>=1.0,<2.0
+argostranslate>=1.9,<2.0
+psycopg[binary]>=3.1,<4.0
